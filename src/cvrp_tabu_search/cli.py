@@ -3,6 +3,7 @@ from typing import Annotated
 
 import typer
 
+from .experiments.reports import DEFAULT_OUTPUT_DIR
 from .experiments.runner import run_baseline_experiment, run_tabu_search_experiment
 from .instances import Instance, load_default_instance, load_instance
 from .search.shared import SearchParameters
@@ -32,6 +33,15 @@ StagnationLimit = Annotated[
     int,
     typer.Option(min=1, help="Stop after this many iterations without improvement."),
 ]
+OutputDirectory = Annotated[
+    Path,
+    typer.Option(
+        file_okay=False,
+        writable=True,
+        show_default=True,
+        help="Parent directory for timestamped CSV and PNG report folders.",
+    ),
+]
 
 
 @app.command("baseline")
@@ -40,11 +50,12 @@ def baseline_command(
     target_cost: TargetCost = None,
     max_iterations: IterationLimit = 10,
     stagnation_limit: StagnationLimit = 10,
+    output_dir: OutputDirectory = DEFAULT_OUTPUT_DIR,
 ) -> None:
     """Run the baseline with reversals within each route."""
     problem = _resolve_instance(instance, target_cost)
     parameters = SearchParameters(max_iterations, stagnation_limit)
-    if not run_baseline_experiment(problem, parameters):
+    if not run_baseline_experiment(problem, parameters, output_dir=output_dir):
         raise typer.Exit(code=1)
 
 
@@ -54,11 +65,12 @@ def tabu_search_command(
     target_cost: TargetCost = None,
     max_iterations: IterationLimit = 60,
     stagnation_limit: StagnationLimit = 30,
+    output_dir: OutputDirectory = DEFAULT_OUTPUT_DIR,
 ) -> None:
     """Run the search with inter-route moves, intensification and diversification."""
     problem = _resolve_instance(instance, target_cost)
     parameters = SearchParameters(max_iterations, stagnation_limit)
-    if not run_tabu_search_experiment(problem, parameters):
+    if not run_tabu_search_experiment(problem, parameters, output_dir=output_dir):
         raise typer.Exit(code=1)
 
 

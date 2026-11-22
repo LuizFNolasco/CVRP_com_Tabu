@@ -52,7 +52,10 @@ def test_experiment_rebuilds_the_initial_fleet_before_every_run(
     instance, reported_parameters, runs = publish.call_args.args
     assert instance is rectangle_instance
     assert reported_parameters is parameters
-    assert publish.call_args.kwargs == {"prefix": "trial_"}
+    assert publish.call_args.kwargs == {
+        "prefix": "trial_",
+        "output_dir": Path("results"),
+    }
 
     history = [SearchHistoryEntry(0, 18, 1.0, 18), SearchHistoryEntry(1, 14, 2.0, 14)]
     expected_runs = [

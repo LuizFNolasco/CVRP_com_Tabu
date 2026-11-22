@@ -1,6 +1,7 @@
 import csv
 import random
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
 
@@ -16,15 +17,24 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(report))
 
 
+def _single_timestamped_directory(output_dir: Path) -> Path:
+    [report_directory] = output_dir.iterdir()
+    assert report_directory.is_dir()
+    datetime.strptime(report_directory.name, "%Y-%m-%d_%H-%M-%S")
+    return report_directory
+
+
 @pytest.fixture
-def report_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    output = tmp_path / "output"
-    output.mkdir()
-    monkeypatch.chdir(output)
+def working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Path]:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
     random_state = random.getstate()
     try:
         with matplotlib.rc_context():
-            yield output
+            yield workspace
     finally:
         random.setstate(random_state)
 
@@ -43,8 +53,8 @@ def report_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     ],
     ids=["baseline", "advanced"],
 )
-def test_subcommand_generates_reports_outside_the_repository(
-    report_directory: Path,
+def test_subcommand_generates_reports_in_the_default_directory(
+    working_directory: Path,
     subcommand: str,
     prefix: str,
     expected_cost: int,
@@ -61,11 +71,14 @@ def test_subcommand_generates_reports_outside_the_repository(
         assert line.startswith(f"Run {repetition}: cost {expected_cost} | time ")
 
     suffix = f"{prefix}A-n32-k5"
+    output_dir = working_directory / "results"
+    report_directory = _single_timestamped_directory(output_dir)
     runs_path = report_directory / f"runs_{suffix}.csv"
     history_path = report_directory / f"history_{suffix}.csv"
     plots = [
         report_directory / f"{kind}_{suffix}.png" for kind in ("convergence", "ttt")
     ]
+    assert list(working_directory.iterdir()) == [output_dir]
     assert set(report_directory.iterdir()) == {runs_path, history_path, *plots}
     for plot in plots:
         assert plot.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), plot
@@ -122,7 +135,7 @@ def rectangle_path(tmp_path: Path) -> Path:
     ids=["baseline", "advanced"],
 )
 def test_cli_uses_custom_instance_target_and_search_limits(
-    report_directory: Path,
+    working_directory: Path,
     rectangle_path: Path,
     subcommand: str,
     prefix: str,
@@ -144,6 +157,7 @@ def test_cli_uses_custom_instance_target_and_search_limits(
     result = CliRunner().invoke(app, arguments)
 
     assert result.exit_code == 0, result.output
+    report_directory = _single_timestamped_directory(working_directory / "results")
     runs = _read_csv(report_directory / f"runs_{prefix}{rectangle_path.stem}.csv")
     assert len(runs) == 5
     assert {run["optimal_cost"] for run in runs} == {"14"}
@@ -155,6 +169,48 @@ def test_cli_uses_custom_instance_target_and_search_limits(
     assert (runs[0]["time_to_target_s"] != "") is (expected_cost == 14)
 
 
+@pytest.mark.parametrize(
+    ("subcommand", "prefix", "absolute_path"),
+    [("baseline", "", False), ("tabu-search", "tabu_", True)],
+    ids=["baseline-relative-path", "tabu-search-absolute-path"],
+)
+def test_subcommand_saves_all_reports_in_the_requested_directory(
+    working_directory: Path, subcommand: str, prefix: str, absolute_path: bool
+) -> None:
+    relative_path = Path("custom results") / "experiment reports"
+    output_dir = working_directory / relative_path
+    requested_path = output_dir if absolute_path else relative_path
+
+    result = CliRunner().invoke(
+        app, [subcommand, "--max-iterations", "0", "--output-dir", str(requested_path)]
+    )
+
+    assert result.exit_code == 0, result.output
+    suffix = f"{prefix}A-n32-k5"
+    report_directory = _single_timestamped_directory(output_dir)
+    assert {path.name for path in report_directory.iterdir()} == {
+        f"runs_{suffix}.csv",
+        f"history_{suffix}.csv",
+        f"convergence_{suffix}.png",
+        f"ttt_{suffix}.png",
+    }
+    assert list(working_directory.iterdir()) == [output_dir.parent]
+
+
+def test_subcommand_rejects_a_file_as_the_output_directory(
+    working_directory: Path,
+) -> None:
+    existing_file = working_directory / "existing.txt"
+    existing_file.write_text("existing content", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["baseline", "--output-dir", existing_file.name])
+
+    assert result.exit_code == 2
+    assert "--output-dir" in result.output
+    assert existing_file.read_text(encoding="utf-8") == "existing content"
+    assert list(working_directory.iterdir()) == [existing_file]
+
+
 def test_subcommand_help_lists_the_available_options() -> None:
     result = CliRunner().invoke(app, ["baseline", "--help"])
 
@@ -164,8 +220,11 @@ def test_subcommand_help_lists_the_available_options() -> None:
         "--target-cost",
         "--max-iterations",
         "--stagnation-limit",
+        "--output-dir",
     ):
         assert option in result.output
+    assert "default: ." not in result.output
+    assert "default: results" in result.output
 
 
 def test_custom_instance_requires_a_reference_cost(

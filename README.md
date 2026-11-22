@@ -20,12 +20,16 @@ uv run cvrp baseline
 uv run cvrp tabu-search
 ```
 
-`baseline` executa o experimento original com inversões dentro de cada rota. `tabu-search` executa a variante com movimentos entre rotas, intensificação e diversificação. Por padrão, ambos usam a instância `A-n32-k5.vrp`, incluída em [`src/cvrp_tabu_search/data/`](src/cvrp_tabu_search/data/), e gravam os resultados em CSV e PNG no diretório de trabalho.
+`baseline` executa o experimento original com inversões dentro de cada rota. `tabu-search` executa a variante com movimentos entre rotas, intensificação e diversificação. Por padrão, ambos usam a instância `A-n32-k5.vrp`, incluída em [`src/cvrp_tabu_search/data/`](src/cvrp_tabu_search/data/).
+
+Cada execução grava seus CSVs e PNGs em uma subpasta com a data e a hora locais, como `results/2026-11-22_18-34-34/`. Se o nome já estiver em uso, a nova subpasta recebe um sufixo numérico.
+
+Use `--output-dir` em qualquer um dos comandos para substituir a pasta base `results/`. O caminho pode ser absoluto ou relativo ao diretório de trabalho. As pastas são criadas automaticamente.
 
 Use `--max-iterations` e `--stagnation-limit` para ajustar os limites. Para usar outra instância CVRP com distâncias `EUC_2D`, informe o arquivo e seu custo ótimo de referência, que serve de alvo no relatório *time-to-target*.
 
 ```sh
-uv run cvrp tabu-search --instance benchmarks/general/A-n33-k5.vrp --target-cost 661 --max-iterations 100 --stagnation-limit 40
+uv run cvrp tabu-search --instance benchmarks/general/A-n33-k5.vrp --target-cost 661 --max-iterations 100 --stagnation-limit 40 --output-dir resultados/a-n33-k5
 ```
 
 A CLI também pode ser executada com `uv run python -m cvrp_tabu_search`.
@@ -37,7 +41,7 @@ Os resultados usam os prefixos `runs_`, `history_`, `convergence_` e `ttt_`. A v
 O pacote vive em [`src/cvrp_tabu_search/`](src/cvrp_tabu_search/).
 
 - [`search/`](src/cvrp_tabu_search/search/) contém os algoritmos e as operações de busca compartilhadas.
-- [`experiments/`](src/cvrp_tabu_search/experiments/) executa os experimentos e gera os relatórios.
+- [`experiments/`](src/cvrp_tabu_search/experiments/) executa os experimentos. O pacote [`experiments/reports/`](src/cvrp_tabu_search/experiments/reports/) coordena a geração dos relatórios e reúne os módulos de CSV, gráficos e diretórios de saída.
 - `cli.py` recebe os argumentos. `instances.py` carrega os dados e `routes.py` reúne as operações de rota.
 
 Os testes acompanham essa organização em `tests/search/`, `tests/experiments/` e `tests/cli/`. Em `tests/cli/`, os testes dos comandos e dos pontos de entrada ficam em arquivos próprios.

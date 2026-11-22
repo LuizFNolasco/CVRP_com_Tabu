@@ -2,6 +2,7 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from time import perf_counter
 
 from ..instances import Instance
@@ -9,7 +10,7 @@ from ..routes import Coordinates, Vehicle, build_initial_solution
 from ..search.baseline import tabu_search as baseline_search
 from ..search.shared import SearchHistory, SearchParameters, SearchResult
 from ..search.tabu import tabu_search
-from .reports import generate_reports
+from .reports import DEFAULT_OUTPUT_DIR, generate_reports
 
 REPETITIONS = 5
 
@@ -29,15 +30,25 @@ class Run:
     time_to_target_s: float | None
 
 
-def run_baseline_experiment(instance: Instance, parameters: SearchParameters) -> bool:
-    return run_experiment(instance, baseline_search, parameters)
+def run_baseline_experiment(
+    instance: Instance,
+    parameters: SearchParameters,
+    *,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+) -> bool:
+    return run_experiment(instance, baseline_search, parameters, output_dir=output_dir)
 
 
 def run_tabu_search_experiment(
-    instance: Instance, parameters: SearchParameters
+    instance: Instance,
+    parameters: SearchParameters,
+    *,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
 ) -> bool:
     search = partial(tabu_search, demands=instance.demands)
-    return run_experiment(instance, search, parameters, report_prefix="tabu_")
+    return run_experiment(
+        instance, search, parameters, report_prefix="tabu_", output_dir=output_dir
+    )
 
 
 def run_experiment(
@@ -46,6 +57,7 @@ def run_experiment(
     parameters: SearchParameters,
     *,
     report_prefix: str = "",
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
 ) -> bool:
     def run_search(fleet: list[Vehicle], start_time: float) -> SearchResult:
         return search(
@@ -62,7 +74,9 @@ def run_experiment(
     if runs is None:
         return False
 
-    generate_reports(instance, parameters, runs, prefix=report_prefix)
+    generate_reports(
+        instance, parameters, runs, prefix=report_prefix, output_dir=output_dir
+    )
     return True
 
 

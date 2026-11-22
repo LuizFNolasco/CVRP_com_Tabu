@@ -1,11 +1,12 @@
 import csv
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from cvrp_tabu_search.experiments import reports
-from cvrp_tabu_search.experiments.reports import TargetMeasurement
+from cvrp_tabu_search.experiments.reports import TargetMeasurement, directory, plots
 from cvrp_tabu_search.experiments.runner import Run
 from cvrp_tabu_search.instances import Instance
 from cvrp_tabu_search.search.shared import (
@@ -49,11 +50,12 @@ def test_reports_use_the_first_cheapest_run_for_history_and_plots(
 
     reports.generate_reports(instance, parameters, runs, prefix="test_")
 
-    assert _read_csv(tmp_path / "history_test_example.csv") == [
+    [run_directory] = (tmp_path / "results").iterdir()
+    assert _read_csv(run_directory / "history_test_example.csv") == [
         ["iteration", "best_cost", "elapsed_time_s", "current_cost"],
         ["1", "18", "0.375", "18"],
     ]
-    run_rows = _read_csv(tmp_path / "runs_test_example.csv")
+    run_rows = _read_csv(run_directory / "runs_test_example.csv")
     assert run_rows[0] == [
         "instance",
         "repetition",
@@ -92,7 +94,24 @@ def test_reports_use_the_first_cheapest_run_for_history_and_plots(
         tied_best_history,
         [(1.0, None), (0.75, 0.375), (0.5, 0.125)],
         prefix="test_",
+        output_dir=run_directory.relative_to(tmp_path),
     )
+
+
+def test_report_directories_are_distinct_when_created_in_the_same_second(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Mock()
+    clock.now.return_value = datetime(2026, 11, 22, 18, 34, 34)
+    monkeypatch.setattr(directory, "datetime", clock)
+    output_dir = tmp_path / "results"
+
+    first_directory = directory.create_report_directory(output_dir)
+    second_directory = directory.create_report_directory(output_dir)
+
+    assert first_directory == output_dir / "2026-11-22_18-34-34"
+    assert second_directory == output_dir / "2026-11-22_18-34-34-2"
+    assert set(output_dir.iterdir()) == {first_directory, second_directory}
 
 
 @pytest.mark.parametrize(
@@ -119,4 +138,4 @@ def test_time_to_target_curve_counts_misses_and_extends_to_the_longest_run(
     percentages: list[float],
     hits: int,
 ) -> None:
-    assert reports._time_to_target_curve(measurements) == (times, percentages, hits)
+    assert plots._time_to_target_curve(measurements) == (times, percentages, hits)
