@@ -21,6 +21,9 @@ def tabu_search(
     start_time: float,
     demands: Sequence[int],
     use_phases: bool = True,
+    *,
+    time_limit_s: float | None = None,
+    target_cost: int | None = None,
 ) -> SearchResult:
     progress = SearchProgress(fleet, coordinates, depot, start_time)
     current_cost = progress.best_cost
@@ -32,6 +35,11 @@ def tabu_search(
     )
 
     for iteration in range(1, max_iterations + 1):
+        if progress.time_limit_reached(time_limit_s) or progress.target_reached(
+            target_cost
+        ):
+            break
+
         stagnation = progress.iterations_without_improvement
         if use_phases and stagnation == 10:
             _restore_routes(fleet, progress.best_routes, demands)
@@ -52,6 +60,9 @@ def tabu_search(
         )
 
         if move is None and (intensify or diversify):
+            if progress.time_limit_reached(time_limit_s):
+                break
+
             intensification_steps = 0
             move = select_neighbor(
                 fleet,

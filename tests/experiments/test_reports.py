@@ -6,8 +6,8 @@ from unittest.mock import Mock
 import pytest
 
 from cvrp_tabu_search.experiments import reports
-from cvrp_tabu_search.experiments.reports import TargetMeasurement, directory, plots
-from cvrp_tabu_search.experiments.runner import Run
+from cvrp_tabu_search.experiments.execution import Run
+from cvrp_tabu_search.experiments.reports import directory
 from cvrp_tabu_search.instances import Instance
 from cvrp_tabu_search.search.shared import (
     SearchHistoryEntry,
@@ -26,7 +26,10 @@ def test_reports_use_the_first_cheapest_run_for_history_and_plots(
 ) -> None:
     instance = Instance("example", 18, 1, 2, 10, [[0, 0], [2, 0]], [0, 1], 1)
     parameters = SearchParameters(
-        max_iterations=20, stagnation_limit=5, tabu_tenure=TabuTenure(2, 4)
+        max_iterations=20,
+        stagnation_limit=5,
+        tabu_tenure=TabuTenure(2, 4),
+        time_limit_s=1.5,
     )
     initial_entry = SearchHistoryEntry(0, 30, 0.0, 30)
     tied_best_history = [initial_entry, SearchHistoryEntry(1, 18, 0.375, 18)]
@@ -51,6 +54,7 @@ def test_reports_use_the_first_cheapest_run_for_history_and_plots(
     reports.generate_reports(instance, parameters, runs, prefix="test_")
 
     [run_directory] = (tmp_path / "results").iterdir()
+    assert (run_directory / "environment.json").is_file()
     assert _read_csv(run_directory / "history_test_example.csv") == [
         ["iteration", "best_cost", "elapsed_time_s", "current_cost"],
         ["1", "18", "0.375", "18"],
@@ -69,9 +73,24 @@ def test_reports_use_the_first_cheapest_run_for_history_and_plots(
         "time_to_best_s",
         "total_time_s",
         "time_to_target_s",
+        "time_limit_s",
     ]
     assert run_rows[1:] == [
-        ["example", "1", "6", "2", "4", "20", "5", "18", "24", "0.25", "1.0", ""],
+        [
+            "example",
+            "1",
+            "6",
+            "2",
+            "4",
+            "20",
+            "5",
+            "18",
+            "24",
+            "0.25",
+            "1.0",
+            "",
+            "1.5",
+        ],
         [
             "example",
             "2",
@@ -85,8 +104,23 @@ def test_reports_use_the_first_cheapest_run_for_history_and_plots(
             "0.375",
             "0.75",
             "0.375",
+            "1.5",
         ],
-        ["example", "3", "8", "2", "4", "20", "5", "18", "18", "0.125", "0.5", "0.125"],
+        [
+            "example",
+            "3",
+            "8",
+            "2",
+            "4",
+            "20",
+            "5",
+            "18",
+            "18",
+            "0.125",
+            "0.5",
+            "0.125",
+            "1.5",
+        ],
     ]
     draw_plots.assert_called_once_with(
         "example",
@@ -112,30 +146,3 @@ def test_report_directories_are_distinct_when_created_in_the_same_second(
     assert first_directory == output_dir / "2026-11-22_18-34-34"
     assert second_directory == output_dir / "2026-11-22_18-34-34-2"
     assert set(output_dir.iterdir()) == {first_directory, second_directory}
-
-
-@pytest.mark.parametrize(
-    ("measurements", "times", "percentages", "hits"),
-    [
-        (
-            [
-                TargetMeasurement(3, 2),
-                TargetMeasurement(1.25, 1),
-                TargetMeasurement(4, None),
-                TargetMeasurement(3, 2),
-            ],
-            [0, 1, 2, 2, 4],
-            [0, 25, 50, 75, 75],
-            3,
-        ),
-        ([TargetMeasurement(2, None), TargetMeasurement(4, None)], [0, 4], [0, 0], 0),
-    ],
-    ids=["sorted-hits-with-a-tie-and-a-miss", "all-missed"],
-)
-def test_time_to_target_curve_counts_misses_and_extends_to_the_longest_run(
-    measurements: list[TargetMeasurement],
-    times: list[float],
-    percentages: list[float],
-    hits: int,
-) -> None:
-    assert plots._time_to_target_curve(measurements) == (times, percentages, hits)

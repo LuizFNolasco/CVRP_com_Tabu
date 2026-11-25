@@ -1,20 +1,21 @@
 from functools import partial
-from unittest.mock import Mock
+from unittest.mock import DEFAULT, Mock
 
 import pytest
 
-from cvrp_tabu_search.experiments.runner import SearchAlgorithm
+from cvrp_tabu_search.experiments.execution import SearchAlgorithm
 from cvrp_tabu_search.routes import Vehicle, build_initial_solution
 from cvrp_tabu_search.search import baseline, shared, tabu
 
 RECTANGLE = [(0, 0), (4, 0), (0, 3), (4, 3)]
+RECTANGLE_DEMANDS = [0, 1, 1, 1]
 PLATEAU_COORDINATES = [(0, 0)] * 5
 PLATEAU_DEMANDS = [0, 1, 2, 1, 2]
 
 
 @pytest.fixture
 def rectangle_fleet() -> list[Vehicle]:
-    fleet = build_initial_solution(1, 4, 3, [0, 1, 1, 1], depot=1)
+    fleet = build_initial_solution(1, 4, 3, RECTANGLE_DEMANDS, depot=1)
     assert fleet is not None
     return fleet
 
@@ -169,6 +170,29 @@ def test_search_stops_at_the_configured_limit(
     assert [iteration for iteration, *_ in history] == list(range(last_iteration + 1))
 
 
+@pytest.mark.parametrize(
+    "algorithm",
+    [baseline.tabu_search, partial(tabu.tabu_search, demands=RECTANGLE_DEMANDS)],
+    ids=["baseline", "advanced"],
+)
+def test_search_keeps_the_best_completed_move_at_the_time_limit(
+    rectangle_fleet: list[Vehicle],
+    algorithm: SearchAlgorithm,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_time = 100.0
+    clock = Mock(side_effect=[100.25, 100.25, 100.5, 100.5])
+    monkeypatch.setattr(shared, "perf_counter", clock)
+
+    result = algorithm(
+        rectangle_fleet, RECTANGLE, 1, (2, 2), 10, 10, initial_time, time_limit_s=0.5
+    )
+
+    assert result.best_routes == [[2, 4, 3]]
+    assert result.best_cost == 14
+    assert result.history == [(0, 18, 0.25, 18), (1, 14, 0.5, 14)]
+
+
 def test_baseline_stops_when_no_route_can_be_reversed() -> None:
     fleet = build_initial_solution(2, 3, 1, [0, 1, 1], depot=1)
     assert fleet is not None
@@ -234,3 +258,37 @@ def test_advanced_search_uses_phases_and_retries_unavailable_diversification(
     assert len(final_attempts) == expected_final_attempts
     assert not final_attempts[-1].get("diversify", False)
     assert history[-1][0] == 21
+
+
+def test_advanced_search_skips_the_fallback_scan_after_time_expires(
+    plateau_fleet: list[Vehicle], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start_time = 100.0
+    time_limit_s = 1.0
+    clock = Mock(return_value=start_time)
+    monkeypatch.setattr(shared, "perf_counter", clock)
+
+    def finish_scan(*_arguments: object, **options: object) -> object:
+        if options.get("intensify"):
+            clock.return_value = start_time + time_limit_s
+            return None
+        return DEFAULT
+
+    select_neighbor = Mock(wraps=tabu.find_best_neighbor, side_effect=finish_scan)
+    monkeypatch.setattr(tabu, "find_best_neighbor", select_neighbor)
+
+    result = tabu.tabu_search(
+        plateau_fleet,
+        PLATEAU_COORDINATES,
+        1,
+        (1, 1),
+        max_iterations=20,
+        stagnation_limit=20,
+        start_time=start_time,
+        demands=PLATEAU_DEMANDS,
+        time_limit_s=time_limit_s,
+    )
+
+    assert select_neighbor.call_count == 11
+    assert select_neighbor.call_args.kwargs["intensify"] is True
+    assert result.history[-1].iteration == 10

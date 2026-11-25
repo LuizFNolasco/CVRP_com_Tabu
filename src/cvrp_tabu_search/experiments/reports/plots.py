@@ -5,7 +5,8 @@ from typing import NamedTuple
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
-from ...search.shared import SearchHistory
+from ...search.shared import SearchHistory, SearchHistoryEntry
+from ..summary import InstanceSummary, gap
 from .directory import DEFAULT_OUTPUT_DIR, create_report_directory
 
 
@@ -28,67 +29,82 @@ def generate_plots(
 
     plt.style.use("default")
     name = f"{prefix}{instance_name}"
-    convergence_path = output_dir / f"convergence_{name}.png"
-    time_to_target_path = output_dir / f"ttt_{name}.png"
-    _plot_convergence(instance_name, optimal_cost, best_history, convergence_path)
-    _plot_time_to_target(instance_name, optimal_cost, measurements, time_to_target_path)
-
-
-def _plot_convergence(
-    instance_name: str, optimal_cost: int, history: SearchHistory, path: Path
-) -> None:
-    iterations: list[int] = []
-    costs: list[int] = []
-
     # The first history entry is the initial solution.
-    for iteration, _, _, current_cost in history[1:]:
-        iterations.append(iteration)
-        costs.append(current_cost)
+    plot_convergence(
+        optimal_cost, best_history[1:], output_dir / f"convergence_{name}.png"
+    )
+    times = [measurement.time_to_target_s for measurement in measurements]
+    plot_time_to_target(optimal_cost, times, output_dir / f"ttt_{name}.png")
 
-    figure, axes = plt.subplots(figsize=(9, 5))
-    axes.plot(iterations, costs, color="tab:blue", label="Iteration cost")
+
+def plot_convergence(
+    optimal_cost: int, entries: Sequence[SearchHistoryEntry], path: Path
+) -> None:
+    iterations = [entry.iteration for entry in entries]
+    figure, axes = plt.subplots(figsize=(7, 4))
+    axes.plot(
+        iterations,
+        [entry.current_cost for entry in entries],
+        color="0.7",
+        linewidth=0.8,
+        label="Solução corrente",
+    )
+    axes.step(
+        iterations,
+        [entry.best_cost for entry in entries],
+        where="post",
+        color="tab:blue",
+        linewidth=1.6,
+        label="Melhor solução",
+    )
     axes.axhline(
         optimal_cost,
         color="tab:orange",
         linestyle="--",
-        label=f"Optimum: {optimal_cost}",
+        label=f"Ótimo conhecido ({optimal_cost})",
     )
-    axes.set_title(f"Tabu search convergence — {instance_name}")
-    axes.set_xlabel("Iteration")
-    axes.set_ylabel("Total cost")
+    if iterations:
+        axes.set_xlim(left=1)
+    axes.set_xlabel("Iteração")
+    axes.set_ylabel("Custo total")
+    axes.grid(alpha=0.3)
     axes.legend()
+    save_figure(figure, path)
 
-    _save_figure(figure, path)
+
+def time_to_target_points(
+    times: Sequence[float | None],
+) -> tuple[list[float], list[float]]:
+    """Points (t_i, (i - 1/2) / n) of Aiex et al. (2007); misses count in n."""
+    total = len(times)
+    hits = sorted(time for time in times if time is not None)
+    probabilities = [(index - 0.5) / total for index in range(1, len(hits) + 1)]
+    return hits, probabilities
 
 
-def _plot_time_to_target(
-    instance_name: str,
-    optimal_cost: int,
-    measurements: Sequence[TargetMeasurement],
-    path: Path,
+def plot_time_to_target(
+    target_cost: int, times: Sequence[float | None], path: Path
 ) -> None:
-    times, percentages, hits = _time_to_target_curve(measurements)
-    total = len(measurements)
-
-    figure, axes = plt.subplots(figsize=(9, 5))
-    axes.step(
-        times,
-        percentages,
-        where="post",
+    hits, probabilities = time_to_target_points(times)
+    figure, axes = plt.subplots(figsize=(7, 4))
+    axes.plot(
+        hits,
+        probabilities,
+        marker="o",
+        markersize=3,
         color="tab:blue",
-        label=f"Target {optimal_cost}: {hits} of {total}",
+        label=f"Alvo {target_cost}: {len(hits)} de {len(times)} execuções",
     )
-    axes.set_title(f"Time to target — {instance_name}")
-    axes.set_xlabel("Elapsed time (s)")
-    axes.set_ylabel("Runs that reached the target (%)")
-    axes.set_ylim(-4, 104)
-    axes.set_yticks([0, 25, 50, 75, 100])
-    axes.legend()
+    axes.set_xlabel("Tempo até o alvo (s)")
+    axes.set_ylabel("Probabilidade acumulada")
+    axes.set_xlim(left=0)
+    axes.set_ylim(0, 1)
+    axes.grid(alpha=0.3)
+    axes.legend(loc="lower right")
+    save_figure(figure, path)
 
-    _save_figure(figure, path)
 
-
-def _save_figure(figure: Figure, path: Path) -> None:
+def save_figure(figure: Figure, path: Path) -> None:
     try:
         figure.tight_layout()
         figure.savefig(path, dpi=200)
@@ -96,25 +112,32 @@ def _save_figure(figure: Figure, path: Path) -> None:
         plt.close(figure)
 
 
-def _time_to_target_curve(
-    measurements: Sequence[TargetMeasurement],
-) -> tuple[list[float], list[float], int]:
-    target_times: list[float] = []
-    longest_run = 0.0
-    for total_time, target_time in measurements:
-        longest_run = max(longest_run, total_time)
-        if target_time is not None:
-            target_times.append(target_time)
+_GROUP_STYLE = {
+    "A": ("o", "tab:blue"),
+    "B": ("s", "tab:orange"),
+    "F": ("^", "tab:green"),
+}
 
-    target_times.sort()
-    total = len(measurements)
-    times: list[float] = [0]
-    percentages: list[float] = [0]
-    for hits, time in enumerate(target_times, start=1):
-        times.append(time)
-        percentages.append(100 * hits / total)
 
-    # Extend the curve to the end of the observation window.
-    times.append(longest_run)
-    percentages.append(percentages[-1])
-    return times, percentages, len(target_times)
+def plot_gap_by_size(summaries: Sequence[InstanceSummary], path: Path) -> None:
+    figure, axes = plt.subplots(figsize=(7, 4))
+    for group in sorted({summary.group for summary in summaries}):
+        members = [summary for summary in summaries if summary.group == group]
+        marker, color = _GROUP_STYLE.get(group, ("o", "tab:gray"))
+        sizes = [summary.customers for summary in members]
+        worst = [max(gap(cost, s.optimal_cost) for cost in s.costs) for s in members]
+        axes.vlines(sizes, [s.gap_best for s in members], worst, color=color, alpha=0.4)
+        axes.scatter(
+            sizes,
+            [s.gap_mean for s in members],
+            marker=marker,
+            color=color,
+            label=f"Conjunto {group}",
+            zorder=3,
+        )
+    axes.axhline(0, color="0.5", linewidth=0.8)
+    axes.set_xlabel("Número de clientes")
+    axes.set_ylabel("Gap em relação ao ótimo (%)")
+    axes.grid(alpha=0.3)
+    axes.legend()
+    save_figure(figure, path)
